@@ -7,7 +7,7 @@ _wikitionary -> rdbms_ (only sqlite supported at this time)
 
 ## About
 
-This is a .py project (poc of my own earlier attempt with .js) that will take a wiktionary archive dump and parse/normalize it into a relational database.
+This is a .py project (poc of my own earlier attempt with [.js](https://github.com/cpietrzykowski/wikiwords)) that will take a wiktionary archive dump and parse/normalize it into a relational database.
 
 
 ## Why
