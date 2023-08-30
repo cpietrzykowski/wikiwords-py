@@ -1,0 +1,7 @@
+# vs
+.devcontainer
+.venv
+.vscode
+
+out/
+__pycache__
