@@ -34,7 +34,10 @@ Now you can make your own lists.
 ## Developing
 
 1. setup env
-    > python -m venv /path/to/new/virtual/environment
+
+    cpython `> python -m venv /path/to/new/virtual/environment`
+
+    pypy `> pypy/python -m venv .pypyvenv`
 2. activate env
     > source .venv/bin/activate
 3. install requirements

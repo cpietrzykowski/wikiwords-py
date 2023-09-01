@@ -1,6 +1,7 @@
 # vs
 .devcontainer
 .venv
+.pypyvenv
 .vscode
 
 out/

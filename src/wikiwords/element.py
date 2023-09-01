@@ -1,6 +1,5 @@
 
 from typing import Optional
-from io import StringIO
 
 
 class Element:
@@ -9,11 +8,14 @@ class Element:
         self.name = name
         self.attrs = attrs
         self.parent = parent
-        self.text = StringIO()
+        self._text: list[str] = []
         self._children: list[Element] = []
 
     def addText(self, text: str) -> None:
-        self.text.write(text)
+        self._text.append(text)
+
+    def getText(self) -> str:
+        return ''.join(self._text)
 
     def addChild(self, child: "Element") -> None:
         self._children.append(child)

@@ -65,6 +65,7 @@ class DatabaseTable():
     @staticmethod
     def last_insert_id(cursor: Cursor, fallback_query: Optional[Callable[[Cursor], Cursor]]) -> int:
         """ convenience for `last_insert_id` of `cursor` with a fallback query """
+
         # last_id = cursor.lastrowid
         # if last_id is not None and last_id > 0:
         #     return last_id
@@ -139,7 +140,7 @@ class RevisionTable(DatabaseTable):
         def _dump_category(category: LanguageCategory) -> str:
             return json.dumps({
                 "name": category.name,
-                "sections": RevisionTable.dumpSections(category.sections.values())
+                "sections": RevisionTable.dumpSections(list(category.sections.values()))
             })
         
         return json.dumps([_dump_category(x) for x in categories])
@@ -214,12 +215,8 @@ class RevisionsLanguagesTable(DatabaseTable):
             (revision_id, language_id)
         )
 
-        rev_lang_id = DatabaseTable.last_insert_id(
-            cursor,
-            lambda c: c.execute(
-                'SELECT id FROM revisions_languages WHERE revisionid = ? AND languageid = ?',
-                (revision_id, language_id)
-        ))
+        rev_lang_id = cursor.lastrowid
+        assert(rev_lang_id is not None)
 
         for v in language.categories.values():
             RevisionsLanguagesCategoriesTable.save(cursor, rev_lang_id, v)

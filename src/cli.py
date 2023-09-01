@@ -18,10 +18,13 @@ logger.setLevel(os.environ.get("LOG_LEVEL", logging.INFO))
 
 def page_handler(
     conn: sqlite.Connection,
+    cursor: sqlite.Cursor,
     languages: list[str],
     batch_size: int
 ) -> tuple[Callable[[WordPage], None], Callable[[], int]]:
     c: int = 0
+    c_split: int = 0
+    t_last = datetime.now()
 
     def _filter_language(p: WordPage, languages: list[str]) -> Optional[WordPage]:
         """ create a `WordPage` that only contains values of language in `languages` """
@@ -46,17 +49,24 @@ def page_handler(
         
         return None
 
+
     def _handler(p: WordPage) -> None:
         nonlocal c
+        nonlocal c_split
+        nonlocal t_last
         c = c + 1
 
         new_p = _filter_language(p, languages)
         if new_p is None:
             return
     
-        WordTable.save(conn.cursor(), new_p)
+        WordTable.save(cursor, new_p)
         if c % batch_size == 0:
             conn.execute('END TRANSACTION')
+            t_now = datetime.now()
+            logger.info(f"progress ({t_now}): {c} ({((c - c_split) / (t_now - t_last).total_seconds()):.02f} w/s)")
+            c_split = c
+            t_last = t_now
             conn.execute('BEGIN TRANSACTION')
 
     def _count() -> int:
@@ -74,7 +84,7 @@ def main(name: str, argv: list[str]) -> None:
     parser.add_argument(
         '--version', action='version', version=f'%(prog)s {__version__}'
     )
-    parser.add_argument('--language', help='comma delimit if multiple languages')
+    parser.add_argument('--language', help='comma delimited language list')
     parser.add_argument('--sqlite', metavar="DB", required=True)
     parser.add_argument('archive_file')
     args = parser.parse_args(argv)
@@ -87,15 +97,18 @@ def main(name: str, argv: list[str]) -> None:
     logger.info(f'reading from: {archive_file}')
     logger.info(f'writing to: {db_file}')
 
-    conn = create_and_connect(db_file, True)
+    conn = create_and_connect(db_file)
 
     conn.execute('BEGIN TRANSACTION')
     t_start = datetime.now()
     logger.info(f'start: {t_start}')
-    (handler, get_count) = page_handler(conn, languages, 500)
-    with open(archive_file, encoding="utf-8") as f:
-        ParseWordPages(f, lambda p: handler(p))
+    cursor = conn.cursor()
+    (handler, get_count) = page_handler(conn, cursor, languages, 10000)
 
+    with open(archive_file, encoding="utf-8") as f:
+        ParseWordPages(f, handler)
+
+    cursor.close()
     t_end = datetime.now()
     word_count = get_count()
     logger.info(f"words: {word_count} ({(word_count / (t_end - t_start).total_seconds()):.02f} w/s)")

@@ -1,6 +1,7 @@
 from typing import Callable, TextIO
 
-from lxml import etree
+# from lxml import etree
+from lxml.etree import XMLParser, parse
 
 from .parser import MediaWikiPageTarget as ParserTarget
 from .wiki_page import WordPage
@@ -12,7 +13,7 @@ def ParseWordPages(stream: TextIO, on_page: WordPageCallback) -> None:
     """ main page parser for word pages """
 
     target = ParserTarget(on_page)
-    parser = etree.XMLParser(
+    parser = XMLParser(
         # encoding='utf-8',
         target=target,
         attribute_defaults=False,
@@ -26,5 +27,5 @@ def ParseWordPages(stream: TextIO, on_page: WordPageCallback) -> None:
         remove_blank_text=True
     )
 
-    etree.parse(stream, parser)
+    parse(stream, parser)
     target.close()

@@ -162,22 +162,22 @@ class WordRevision(TextSection):
             return None
 
         fmt = e.getChild("format")
-        if fmt is None or fmt.text.getvalue() != WordRevision.TEXT_MIME:
+        if fmt is None or fmt.getText() != WordRevision.TEXT_MIME:
             return None
 
         txt = e.getChild("text")
         if txt is None:
             return None
 
-        (languages, uc, um, ud) = WordRevision.parse(txt.text.getvalue())
+        (languages, uc, um, ud) = WordRevision.parse(txt.getText())
 
         # python 3.11 will support multiple iso formats
         # dt = datetime.fromisoformat(ts.text)
 
         # strptime doesn't include a timezone, and since the string is
         # specifically "zulu" it should be safe to just set it to utc.
-        dt = datetime.strptime(ts.text.getvalue(), "%Y-%m-%dT%H:%M:%SZ",).replace(tzinfo=timezone.utc)
-        rev = WordRevision(dt, fmt.text.getvalue(), txt.text.getvalue(), languages)
+        dt = datetime.strptime(ts.getText(), "%Y-%m-%dT%H:%M:%SZ",).replace(tzinfo=timezone.utc)
+        rev = WordRevision(dt, fmt.getText(), txt.getText(), languages)
 
         # TODO: for debugging the markdown parser
         rev.addUnparentedCategories(uc)
@@ -226,7 +226,7 @@ class WordPage(WikiPage):
             return None
 
         return WordPage(
-            word.text.getvalue(),
-            e.text.getvalue(),
+            word.getText(),
+            e.getText(),
             WordRevision.from_elements(e.getChildren("revision"))
         )
