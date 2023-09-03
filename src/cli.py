@@ -9,7 +9,7 @@ from typing import Callable, Optional
 from wikiwords._version import __version__
 from wikiwords.db import create_and_connect
 from wikiwords.models import WordTable
-from wikiwords.wiki_page import WordPage, WordRevision
+from wikiwords.wiki_page import RevisionLanguage, WordPage, WordRevision
 from wikiwords.wikiwords import ParseWordPages
 
 logging.basicConfig()
@@ -33,19 +33,12 @@ def page_handler(
             # empty list allows all
             return p
 
-        revisions: list[WordRevision] = []
-        for r in p.revisions:
-            langs = [x for x in r.languages if x.name in languages]
-            if len(langs) > 0:
-                revisions.append(WordRevision(
-                    r.timestamp,
-                    r.format,
-                    r.text.getvalue(),
-                    langs
-                ))
-
-        if len(revisions) > 0:
-            return WordPage(p.name, p.text.getvalue(), revisions)
+        langs = [x for x in p.revision.languages if x.name in languages]
+        if len(langs) > 0:
+            return WordPage(
+                p.name,
+                WordRevision(p.revision.timestamp, langs)
+            )
         
         return None
 
@@ -54,12 +47,12 @@ def page_handler(
         nonlocal c
         nonlocal c_split
         nonlocal t_last
-        c = c + 1
 
         new_p = _filter_language(p, languages)
         if new_p is None:
             return
     
+        c = c + 1
         WordTable.save(cursor, new_p)
         if c % batch_size == 0:
             conn.execute('END TRANSACTION')
@@ -103,7 +96,7 @@ def main(name: str, argv: list[str]) -> None:
     t_start = datetime.now()
     logger.info(f'start: {t_start}')
     cursor = conn.cursor()
-    (handler, get_count) = page_handler(conn, cursor, languages, 10000)
+    (handler, get_count) = page_handler(conn, cursor, languages, 100000)
 
     with open(archive_file, encoding="utf-8") as f:
         ParseWordPages(f, handler)

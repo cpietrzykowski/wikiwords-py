@@ -1,10 +1,30 @@
 import json
-from sqlite3 import Connection, Cursor
+from sqlite3 import Connection, Cursor, IntegrityError
 from typing import Callable, Optional
 
 from .wiki_page import (CategorySection, LanguageCategory, RevisionLanguage,
                         WordPage, WordRevision)
 
+
+def insert_or_select_id(
+        cursor: Cursor,
+        insert_op: Callable[[Cursor], Optional[Cursor]],
+        select_id_op: Callable[[Cursor], Cursor]
+    ) -> Optional[int]:
+        """ guarded insert and retrieve id """
+        # NOTE: `insert_op` accepts optional return type, but is never used
+        # (for supporting lambdas)
+
+        try:
+            insert_op(cursor)
+        except IntegrityError:
+            res = select_id_op(cursor)
+            fetched = res.fetchone()
+            last_id = fetched[0]
+            assert(isinstance(last_id, int))
+            return last_id
+        
+        return cursor.lastrowid
 
 class TableField():
     def __init__(self, fieldType: str, options: Optional[str] = None):
@@ -62,23 +82,6 @@ class DatabaseTable():
         joined_lines = ',\n'.join(lines)
         return f'CREATE TABLE IF NOT EXISTS "{self.name}" ({joined_lines});'
 
-    @staticmethod
-    def last_insert_id(cursor: Cursor, fallback_query: Optional[Callable[[Cursor], Cursor]]) -> int:
-        """ convenience for `last_insert_id` of `cursor` with a fallback query """
-
-        # last_id = cursor.lastrowid
-        # if last_id is not None and last_id > 0:
-        #     return last_id
-
-        if fallback_query is not None:
-            res = fallback_query(cursor)
-            fetched = res.fetchone()
-            last_id = fetched[0]
-            assert(isinstance(last_id, int))
-            return last_id
-
-        raise ValueError("unable to retrieve `lastrowid`")
-
 
 class WordTable(DatabaseTable):
     def __init__(self) -> None:
@@ -92,20 +95,14 @@ class WordTable(DatabaseTable):
 
     @staticmethod
     def save(cursor: Cursor, word: WordPage) -> None:
-        cursor.execute(
-            'INSERT OR IGNORE INTO word (word) VALUES (?)',
-            (word.name,)
+        word_id = insert_or_select_id(
+            cursor,
+            lambda c: c.execute('INSERT INTO word (word) VALUES (?)', (word.name,)),
+            lambda c: c.execute('SELECT id FROM word WHERE word = ?', (word.name,))
         )
 
-        word_id =  DatabaseTable.last_insert_id(
-            cursor,
-            lambda c: c.execute(
-                'SELECT id FROM word WHERE word = ?',
-                (word.name,)
-        ))
-
-        for r in word.revisions:
-            RevisionTable.save(cursor, r, word_id)
+        assert(word_id is not None)
+        RevisionTable.save(cursor, word.revision, word_id)
 
 
 class RevisionTable(DatabaseTable):
@@ -130,7 +127,7 @@ class RevisionTable(DatabaseTable):
         def _dump_section(section: CategorySection) -> str:
             return json.dumps({
                 "name": section.name,
-                "body": section.text
+                "body": section.getText()
             })
 
         return json.dumps([_dump_section(x) for x in sections])
@@ -147,17 +144,12 @@ class RevisionTable(DatabaseTable):
 
     @staticmethod
     def save(cursor: Cursor, revision: WordRevision, word_id: int) -> None:
-        cursor.execute('''INSERT INTO revision (
-    wordid, time, format, uncategorized, unparented_categories, unparented_meta
-)
-VALUES (?, ?, ?, ?, ?, ?)
-''', (
+        cursor.execute(
+            'INSERT INTO revision (wordid, time, uncategorized) VALUES (?, ?, ?)',
+            (
                 word_id,
                 revision.timestamp.isoformat(),
-                revision.format,
                 json.dumps(revision.uncategorizedData),
-                RevisionTable.dumpCategories(revision.unparentedCategories),
-                RevisionTable.dumpSections(revision.unparentedSections)
         ))
 
         revision_id = cursor.lastrowid
@@ -178,18 +170,12 @@ class LanguageTable(DatabaseTable):
         self.addPrimaryKey("id")
 
     @staticmethod
-    def save(cursor: Cursor, language: RevisionLanguage) -> int:
-        cursor.execute(
-            'INSERT OR IGNORE INTO language (language) VALUES (?)',
-            (language.name,)
-        )
-
-        return DatabaseTable.last_insert_id(
+    def save(cursor: Cursor, language: RevisionLanguage) -> Optional[int]:
+        return insert_or_select_id(
             cursor,
-            lambda c: c.execute(
-                'SELECT id FROM language WHERE language = ?',
-                (language.name,)
-        ))
+            lambda c: c.execute('INSERT INTO language (language) VALUES (?)', (language.name,)),
+            lambda c: c.execute('SELECT id FROM language WHERE language = ?', (language.name,))
+        )
 
 
 class RevisionsLanguagesTable(DatabaseTable):
@@ -210,6 +196,8 @@ class RevisionsLanguagesTable(DatabaseTable):
     @staticmethod
     def save(cursor: Cursor, revision_id: int, language: RevisionLanguage) -> None:
         language_id = LanguageTable.save(cursor, language)
+        assert(language_id is not None)
+
         cursor.execute(
             'INSERT INTO revisions_languages (revisionid, languageid) VALUES (?, ?)',
             (revision_id, language_id)
@@ -218,7 +206,8 @@ class RevisionsLanguagesTable(DatabaseTable):
         rev_lang_id = cursor.lastrowid
         assert(rev_lang_id is not None)
 
-        for v in language.categories.values():
+
+        for v in language.getCategories():
             RevisionsLanguagesCategoriesTable.save(cursor, rev_lang_id, v)
 
 
@@ -233,20 +222,12 @@ class CategoryTable(DatabaseTable):
         self.addPrimaryKey("id")
 
     @staticmethod
-    def save(cursor: Cursor, category: str) -> int:
-        """ create a category entry """
-        cursor.execute('''INSERT OR IGNORE INTO category
-(category) VALUES (?)
-''',
-            (category,)
-        )
-    
-        return DatabaseTable.last_insert_id(
+    def save(cursor: Cursor, category: str) -> Optional[int]:
+        return insert_or_select_id(
             cursor,
-            lambda c: c.execute(
-                'SELECT id FROM category WHERE category = ?',
-                (category,)
-        ))
+            lambda c: c.execute('INSERT OR IGNORE INTO category (category) VALUES (?)', (category,)),
+            lambda c: c.execute('SELECT id FROM category WHERE category = ?', (category,))
+        )
 
 
 class RevisionsLanguagesCategoriesTable(DatabaseTable):
@@ -294,18 +275,10 @@ class CategorySectionTable(DatabaseTable):
 
     @staticmethod
     def save(cursor: Cursor, section: CategorySection) -> Optional[int]:
-        cursor.execute('''INSERT OR IGNORE INTO category_section
-(section) VALUES (?)
-''',
-            (section.name,)
-        )
-
-        return DatabaseTable.last_insert_id(
+        return insert_or_select_id(
             cursor,
-            lambda c: c.execute(
-                'SELECT id FROM category_section WHERE section = ?',
-                (section.name,)
-            )
+            lambda c: c.execute('INSERT OR IGNORE INTO category_section(section) VALUES (?)', (section.name,)),
+            lambda c: c.execute('SELECT id FROM category_section WHERE section = ?', (section.name,))
         )
 
 

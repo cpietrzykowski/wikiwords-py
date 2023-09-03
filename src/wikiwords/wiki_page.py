@@ -1,6 +1,5 @@
 import re
 from datetime import datetime, timezone
-from io import StringIO
 from typing import Optional
 
 from .element import Element
@@ -8,10 +7,13 @@ from .element import Element
 
 class TextSection():
     def __init__(self, text: str = ""):
-        self.text = StringIO(text)
+        self._text = [text]
 
     def addText(self, text: str) -> None:
-        self.text.write(text)
+        self._text.append(text)
+
+    def getText(self) -> str:
+        return '\n'.join(self._text)
 
 
 class CategorySection(TextSection):
@@ -43,14 +45,33 @@ class RevisionLanguage(TextSection):
     def __init__(self, name: str, categories: dict[str, LanguageCategory] = {}, text: str = ""):
         super().__init__(text)
         self.name = name
-        self.categories = categories
+        self._categories = categories
 
     def getCategory(self, name: str) -> Optional[LanguageCategory]:
-        if not name in self.categories:
-            self.categories[name] = LanguageCategory(name)
+        if not name in self._categories:
+            self._categories[name] = LanguageCategory(name)
 
-        return self.categories.get(name)
+        return self._categories.get(name)
+    
+    def getCategories(self) -> list[LanguageCategory]:
+        """ process language section body to categories """
+        categories: list[LanguageCategory] = []
+        currentCategory: Optional[LanguageCategory] = None
 
+        for l in self.getText().splitlines():
+            headerMatch = re.match(r"^===\s*([^=]+)\s*===$", l)
+            if headerMatch is None:
+                if currentCategory is None:
+                    # ???
+                    pass
+                else:
+                    currentCategory.addText(l.strip())
+                continue
+
+            currentLanguage = LanguageCategory(headerMatch.group(1).lower())
+            categories.append(currentLanguage)
+
+        return categories
 
 class WordRevision(TextSection):
     TEXT_MIME = "text/x-wiki"
@@ -73,14 +94,10 @@ class WordRevision(TextSection):
     def __init__(
         self,
         timestamp: datetime,
-        format: str,
-        text: str,
         languages: list[RevisionLanguage] = [],
     ):
         super().__init__()
         self.timestamp = timestamp
-        self.format = format
-        self.text = StringIO(text)
         self.languages = languages
 
         # TODO: for markdown parser debugging
@@ -98,7 +115,29 @@ class WordRevision(TextSection):
         self.uncategorizedData = d
 
     @staticmethod
-    def parse(text: str) -> tuple[list[RevisionLanguage], list[LanguageCategory], list[CategorySection], list[str]]:
+    def parse(body: str) -> tuple[list[RevisionLanguage], list[str]]:
+        """ rough first pass -- delay more complex parsing """
+        langs: list[RevisionLanguage] = []
+        currentLanguage: Optional[RevisionLanguage] = None
+        uncategorized: list[str] = []
+
+        for l in body.splitlines():
+            headerMatch = re.match(r"^==\s*([^=]+)\s*==$", l)
+            if headerMatch is None:
+                if currentLanguage is None:
+                    uncategorized.append(l.strip())
+                else:
+                    currentLanguage.addText(l.strip())
+                continue
+
+            currentLanguage = RevisionLanguage(headerMatch.group(1).lower())
+            langs.append(currentLanguage)
+
+        return langs, uncategorized
+
+
+    @staticmethod
+    def fullparse(text: str) -> tuple[list[RevisionLanguage], list[LanguageCategory], list[CategorySection], list[str]]:
         """
         attempts to parse the "wiki markdown" for a page's word
 
@@ -169,7 +208,7 @@ class WordRevision(TextSection):
         if txt is None:
             return None
 
-        (languages, uc, um, ud) = WordRevision.parse(txt.getText())
+        (languages, uncategorized) = WordRevision.parse(txt.getText())
 
         # python 3.11 will support multiple iso formats
         # dt = datetime.fromisoformat(ts.text)
@@ -177,12 +216,10 @@ class WordRevision(TextSection):
         # strptime doesn't include a timezone, and since the string is
         # specifically "zulu" it should be safe to just set it to utc.
         dt = datetime.strptime(ts.getText(), "%Y-%m-%dT%H:%M:%SZ",).replace(tzinfo=timezone.utc)
-        rev = WordRevision(dt, fmt.getText(), txt.getText(), languages)
+        rev = WordRevision(dt, languages)
 
         # TODO: for debugging the markdown parser
-        rev.addUnparentedCategories(uc)
-        rev.addUnparentedSections(um)
-        rev.addUncategorizedData(ud)
+        rev.addUncategorizedData(uncategorized)
         return rev
 
     @staticmethod
@@ -191,13 +228,12 @@ class WordRevision(TextSection):
             WordRevision.from_element(e) for e in elements
         ] if r is not None]
 
-        return sorted(revisions, key=lambda r: r.timestamp)
+        return sorted(revisions, key=lambda r: r.timestamp, reverse=True)
 
 
 class WikiPage():
     # TODO: maybe support other kinds of pages, for other archives?
-    def __init__(self, text: str):
-        self.text = StringIO(text)
+    pass
 
 
 class WordPage(WikiPage):
@@ -207,17 +243,9 @@ class WordPage(WikiPage):
         > reference `ns 0` is a word page
     """
 
-    def __init__(self, name: str, text: str, revisions: list[WordRevision] = []):
-        super().__init__(text)
+    def __init__(self, name: str, revision: WordRevision):
         self.name = name
-        self.revisions = revisions
-
-    def most_recent_revision(self) -> Optional[WordRevision]:
-        rcount = len(self.revisions)
-        if rcount > 0:
-            return self.revisions[rcount - 1]
-
-        return None
+        self.revision = revision
 
     @staticmethod
     def from_element(e: Element) -> Optional["WordPage"]:
@@ -225,8 +253,6 @@ class WordPage(WikiPage):
         if word is None:
             return None
 
-        return WordPage(
-            word.getText(),
-            e.getText(),
-            WordRevision.from_elements(e.getChildren("revision"))
-        )
+        revisions = WordRevision.from_elements(e.getChildren("revision"))
+        assert(len(revisions) > 0)
+        return WordPage(word.getText(), revisions[0])

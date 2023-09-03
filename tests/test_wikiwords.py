@@ -5,8 +5,8 @@ from datetime import datetime, timezone
 from wikiwords.wiki_page import WordPage
 from wikiwords.wikiwords import ParseWordPages
 
-from .fixtures.multi_page import MULTI_PAGE_FIXTURE
-from .fixtures.single_page import SINGLE_PAGE_FIXTURE
+from tests.fixtures.multi_page import MULTI_PAGE_FIXTURE
+from tests.fixtures.single_page import SINGLE_PAGE_FIXTURE
 
 
 class TestWikiwords(unittest.TestCase):
@@ -26,9 +26,6 @@ class TestWikiwords(unittest.TestCase):
         )
 
         self.assertEqual([w.name for w in words], ["raven"])
-        self.assertEqual([
-            [r.format for r in w.revisions] for w in words
-        ], [["text/x-wiki"]])
 
     def test_file_stream(self) -> None:
         # TODO: should probably be moved into an integration test
@@ -49,25 +46,23 @@ class TestWikiwords(unittest.TestCase):
         )
 
         self.assertEqual([
-            [w.name, [[l.name for l in r.languages] for r in w.revisions]] for w in words
+            [w.name, [l.name for l in w.revision.languages]] for w in words
         ], [
-            ['dictionary', [["foo"], ["english"]]],
-            ['raven', [[
+            ['dictionary', ["english"]],
+            ['raven', [
                 "english", "dutch", "german", "middle dutch", "slovene", "swedish"
-            ]]]
+            ]]
         ])
 
         self.assertEqual([
-            [r.timestamp for r in revisions] for revisions in [w.revisions for w in words]
-        ], [[
-            datetime(2023, 7, 23, 21, 0, 27, tzinfo=timezone.utc),
-            datetime(2023, 7, 23, 21, 30, 27, tzinfo=timezone.utc)
+            r.timestamp for r in [w.revision for w in words]
         ], [
-            datetime(2023, 7, 21, 13, 32, 9, tzinfo=timezone.utc)
-        ]])
+            datetime(2023, 7,23, 21, 30, 27, tzinfo=timezone.utc),
+            datetime(2023, 7, 21, 13, 32, 9, tzinfo=timezone.utc),
+        ])
 
         self.assertEqual([
-            r.timestamp for r in [w.most_recent_revision() for w in words] if r is not None
+            r.timestamp for r in [w.revision for w in words]
         ], [
             datetime(2023, 7, 23, 21, 30, 27, tzinfo=timezone.utc),
             datetime(2023, 7, 21, 13, 32, 9, tzinfo=timezone.utc)
