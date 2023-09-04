@@ -3,7 +3,7 @@ from sqlite3 import Connection, Cursor, IntegrityError
 from typing import Callable, Optional
 
 from .wiki_page import (CategorySection, LanguageCategory, RevisionLanguage,
-                        WordPage, WordRevision)
+                        WordPage)
 
 
 def insert_or_select_id(
@@ -88,39 +88,15 @@ class WordTable(DatabaseTable):
         super().__init__("word")
         self.setFields({
             "id": TableField("INTEGER", "NOT NULL"),
-            "word": TableField("TEXT", "NOT NULL UNIQUE")
-        })
+            "word": TableField("TEXT", "NOT NULL UNIQUE"),
 
-        self.addPrimaryKey("id")
-
-    @staticmethod
-    def save(cursor: Cursor, word: WordPage) -> None:
-        word_id = insert_or_select_id(
-            cursor,
-            lambda c: c.execute('INSERT INTO word (word) VALUES (?)', (word.name,)),
-            lambda c: c.execute('SELECT id FROM word WHERE word = ?', (word.name,))
-        )
-
-        assert(word_id is not None)
-        RevisionTable.save(cursor, word.revision, word_id)
-
-
-class RevisionTable(DatabaseTable):
-    def __init__(self) -> None:
-        super().__init__("revision")
-        self.setFields({
-            "id": TableField("INTEGER", "NOT NULL"),
-            "wordid": TableField("INTEGER", "NOT NULL"),
+            # most recent revision fields
             "time": TableField("TEXT"),
-            "format": TableField("TEXT"),
-            "text": TableField("TEXT"),
             "uncategorized": TableField("TEXT"),
             "unparented_categories": TableField("TEXT"),
-            "unparented_meta": TableField("TEXT"),
         })
 
         self.addPrimaryKey("id")
-        self.addForeignKey(["wordid"], "word", ["id"])
 
     @staticmethod
     def dumpSections(sections: list[CategorySection]) -> str:
@@ -132,31 +108,78 @@ class RevisionTable(DatabaseTable):
 
         return json.dumps([_dump_section(x) for x in sections])
     
+
     @staticmethod
     def dumpCategories(categories: list[LanguageCategory]) -> str:
         def _dump_category(category: LanguageCategory) -> str:
             return json.dumps({
                 "name": category.name,
-                "sections": RevisionTable.dumpSections(list(category.sections.values()))
+                "sections": WordTable.dumpSections(list(category.getSections()))
             })
         
         return json.dumps([_dump_category(x) for x in categories])
 
     @staticmethod
-    def save(cursor: Cursor, revision: WordRevision, word_id: int) -> None:
-        cursor.execute(
-            'INSERT INTO revision (wordid, time, uncategorized) VALUES (?, ?, ?)',
-            (
-                word_id,
-                revision.timestamp.isoformat(),
-                json.dumps(revision.uncategorizedData),
-        ))
+    def save(cursor: Cursor, word: WordPage, languages: list[str] = []) -> bool:
+        filtered_languages = word.revision.getLanguages(*languages)
+        if not len(filtered_languages) > 0:
+            return False
 
-        revision_id = cursor.lastrowid
-        assert(revision_id is not None)
+        word_id = insert_or_select_id(
+            cursor,
+            lambda c: c.execute('''INSERT INTO
+word (word, time, uncategorized, unparented_categories)
+VALUES (?, ?, ?, ?)
+''',
+                (
+                    word.name,
+                    word.revision.timestamp.isoformat(),
+                    json.dumps(word.revision.uncategorizedData),
+                    WordTable.dumpCategories(word.revision.unparentedCategories)
+                )),
+            lambda c: c.execute('SELECT id FROM word WHERE word = ?', (word.name,))
+        )
 
-        for l in revision.languages:
-            RevisionsLanguagesTable.save(cursor, revision_id, l)
+        assert(word_id is not None)
+        for l in filtered_languages:
+            WordLanguagesTable.save(cursor, word_id, l)
+
+        return True
+
+
+# class RevisionTable(DatabaseTable):
+#     def __init__(self) -> None:
+#         super().__init__("revision")
+#         self.setFields({
+#             "id": TableField("INTEGER", "NOT NULL"),
+#             "wordid": TableField("INTEGER", "NOT NULL"),
+#             "time": TableField("TEXT"),
+#             "uncategorized": TableField("TEXT"),
+#             "unparented_categories": TableField("TEXT"),
+#         })
+
+#         self.addPrimaryKey("id")
+#         self.addForeignKey(["wordid"], "word", ["id"])
+
+
+
+
+#     @staticmethod
+#     def save(cursor: Cursor, revision: WordRevision, word_id: int) -> None:
+#         cursor.execute(
+#             'INSERT INTO revision (wordid, time, uncategorized, unparented_categories) VALUES (?, ?, ?, ?)',
+#             (
+#                 word_id,
+#                 revision.timestamp.isoformat(),
+#                 json.dumps(revision.uncategorizedData),
+#                 json.dumps(revision.unparentedCategories),
+#         ))
+
+#         revision_id = cursor.lastrowid
+#         assert(revision_id is not None)
+
+#         for l in revision.languages:
+#             RevisionsLanguagesTable.save(cursor, revision_id, l)
 
 
 class LanguageTable(DatabaseTable):
@@ -178,37 +201,36 @@ class LanguageTable(DatabaseTable):
         )
 
 
-class RevisionsLanguagesTable(DatabaseTable):
+class WordLanguagesTable(DatabaseTable):
     """ join table for relating a revision to a language """
     def __init__(self) -> None:
-        super().__init__("revisions_languages")
+        super().__init__("word_languages")
         self.setFields({
             "id": TableField("INTEGER", "NOT NULL"),
-            "revisionid": TableField("INTEGER", "NOT NULL"),
+            "wordid": TableField("INTEGER", "NOT NULL"),
             "languageid": TableField("INTEGER", "NOT NULL"),
-            "text": TableField("TEXT")
         })
 
         self.addPrimaryKey("id")
-        self.addForeignKey(["revisionid"], "revision", ["id"])
+        self.addForeignKey(["wordid"], "word", ["id"])
         self.addForeignKey(["languageid"], "language", ["id"])
 
     @staticmethod
-    def save(cursor: Cursor, revision_id: int, language: RevisionLanguage) -> None:
+    def save(cursor: Cursor, word_id: int, language: RevisionLanguage) -> None:
         language_id = LanguageTable.save(cursor, language)
         assert(language_id is not None)
 
         cursor.execute(
-            'INSERT INTO revisions_languages (revisionid, languageid) VALUES (?, ?)',
-            (revision_id, language_id)
+            'INSERT INTO word_languages (wordid, languageid) VALUES (?, ?)',
+            (word_id, language_id)
         )
 
-        rev_lang_id = cursor.lastrowid
-        assert(rev_lang_id is not None)
+        word_lang_id = cursor.lastrowid
+        assert(word_lang_id is not None)
 
 
         for v in language.getCategories():
-            RevisionsLanguagesCategoriesTable.save(cursor, rev_lang_id, v)
+            RevisionsLanguagesCategoriesTable.save(cursor, word_lang_id, v)
 
 
 class CategoryTable(DatabaseTable):
@@ -238,7 +260,6 @@ class RevisionsLanguagesCategoriesTable(DatabaseTable):
             "id": TableField("INTEGER", "NOT NULL"),
             "revlangid": TableField("INTEGER", "NOT NULL"),
             "categoryid": TableField("INTEGER", "NOT NULL"),
-            "data": TableField("TEXT")
         })
 
         self.addPrimaryKey("id")
@@ -256,7 +277,7 @@ class RevisionsLanguagesCategoriesTable(DatabaseTable):
 
         revision_language_category_id = cursor.lastrowid
         assert(revision_language_category_id is not None)
-        for v in category.sections.values():
+        for v in category.getSections():
             RevisionsLanguagesCategorySectionTable.save(
                 cursor,
                 revision_language_category_id,
@@ -308,11 +329,10 @@ class RevisionsLanguagesCategorySectionTable(DatabaseTable):
 def models() -> list[DatabaseTable]:
     return [
         WordTable(),
-        RevisionTable(),
         LanguageTable(),
         CategoryTable(),
         CategorySectionTable(),
-        RevisionsLanguagesTable(),
+        WordLanguagesTable(),
         RevisionsLanguagesCategoriesTable(),
         RevisionsLanguagesCategorySectionTable(),
     ]

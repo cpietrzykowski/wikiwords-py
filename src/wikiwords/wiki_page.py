@@ -1,77 +1,112 @@
 import re
 from datetime import datetime, timezone
+from io import StringIO
 from typing import Optional
 
 from .element import Element
 
 
 class TextSection():
-    def __init__(self, text: str = ""):
-        self._text = [text]
+    def __init__(self, body: str = ""):
+        self._body = StringIO(body)
 
     def addText(self, text: str) -> None:
-        self._text.append(text)
+        self._body.write(text)
 
     def getText(self) -> str:
-        return '\n'.join(self._text)
+        return self._body.getvalue()
 
 
 class CategorySection(TextSection):
     """ inflection, alternative forms, descendants, derived terms, etc. """
 
-    def __init__(self, name: str, text: str = ""):
-        super().__init__(text)
+    def __init__(self, name: str, body: str = ""):
+        super().__init__(body)
         self.name = name
 
 
 class LanguageCategory(TextSection):
     """ represents a word class, ex: noun, verb, adjective, adverb, etc. """
 
-    def __init__(self, name: str, text: str = "", sections: dict[str, CategorySection] = {}):
-        super().__init__(text)
+    def __init__(self, name: str, body: str = ""):
+        super().__init__(body)
         self.name = name
-        self.sections = sections
+        self._sections: Optional[list[CategorySection]] = None
+
+    def _parse_body(self) -> None:
+        self._sections = []
+        currentSection: Optional[CategorySection] = None
+
+        for l in self.getText().splitlines(True):
+            headerMatch = re.match(r"^====\s*([^=]+)\s*====$", l)
+            if headerMatch is None:
+                if currentSection is None:
+                    # TODO
+                    pass
+                else:
+                    currentSection.addText(l.strip())
+                continue
+
+            currentSection = CategorySection(headerMatch.group(1).lower())
+            self._sections.append(currentSection)
 
     def getSection(self, name: str) -> Optional[CategorySection]:
-        if not name in self.sections:
-            self.sections[name] = CategorySection(name)
+        sections = [s for s in self.getSections() if s.name.lower() == name.lower()]
+        if len(sections) > 0:
+            assert(len(sections) == 1)
+            return sections[0]
 
-        return self.sections.get(name)
+        return None
+    
+    def getSections(self) -> list[CategorySection]:
+        if self._sections is None:
+            self._parse_body()
+
+        return self._sections or []
 
 
 class RevisionLanguage(TextSection):
     """ represents a word's language """
 
-    def __init__(self, name: str, categories: dict[str, LanguageCategory] = {}, text: str = ""):
-        super().__init__(text)
+    def __init__(self, name: str, body: str = ""):
+        super().__init__(body)
         self.name = name
-        self._categories = categories
+        self._categories: Optional[list[LanguageCategory]] = None
 
     def getCategory(self, name: str) -> Optional[LanguageCategory]:
-        if not name in self._categories:
-            self._categories[name] = LanguageCategory(name)
+        if self._categories is None:
+            return None
 
-        return self._categories.get(name)
-    
-    def getCategories(self) -> list[LanguageCategory]:
+        # just find the first matching `category`
+        for c in self._categories:
+            if c.name.lower() == name.lower():
+                return c
+
+        return None
+
+    def _parse_body(self) -> None:
         """ process language section body to categories """
-        categories: list[LanguageCategory] = []
+        self._categories = []
         currentCategory: Optional[LanguageCategory] = None
 
-        for l in self.getText().splitlines():
+        for l in self.getText().splitlines(True):
             headerMatch = re.match(r"^===\s*([^=]+)\s*===$", l)
             if headerMatch is None:
                 if currentCategory is None:
-                    # ???
+                    # TODO
                     pass
                 else:
-                    currentCategory.addText(l.strip())
+                    currentCategory.addText(l)
                 continue
 
-            currentLanguage = LanguageCategory(headerMatch.group(1).lower())
-            categories.append(currentLanguage)
+            currentCategory = LanguageCategory(headerMatch.group(1).lower())
+            self._categories.append(currentCategory)
 
-        return categories
+    def getCategories(self) -> list[LanguageCategory]:
+        if self._categories is None:
+            self._parse_body()
+
+        return self._categories or []
 
 class WordRevision(TextSection):
     TEXT_MIME = "text/x-wiki"
@@ -91,14 +126,10 @@ class WordRevision(TextSection):
         "toc": [r"^__TOC__"],
     }
 
-    def __init__(
-        self,
-        timestamp: datetime,
-        languages: list[RevisionLanguage] = [],
-    ):
-        super().__init__()
+    def __init__(self, timestamp: datetime, body: str = ''):
+        super().__init__(body)
         self.timestamp = timestamp
-        self.languages = languages
+        self._languages: Optional[list[RevisionLanguage]] = None
 
         # TODO: for markdown parser debugging
         self.unparentedCategories: list[LanguageCategory] = []
@@ -114,84 +145,32 @@ class WordRevision(TextSection):
     def addUncategorizedData(self, d: list[str]) -> None:
         self.uncategorizedData = d
 
-    @staticmethod
-    def parse(body: str) -> tuple[list[RevisionLanguage], list[str]]:
+    def _parse_body(self) -> None:
         """ rough first pass -- delay more complex parsing """
-        langs: list[RevisionLanguage] = []
+        self._languages = []
         currentLanguage: Optional[RevisionLanguage] = None
-        uncategorized: list[str] = []
 
-        for l in body.splitlines():
+        for l in self.getText().splitlines(True):
             headerMatch = re.match(r"^==\s*([^=]+)\s*==$", l)
             if headerMatch is None:
                 if currentLanguage is None:
-                    uncategorized.append(l.strip())
+                    self.uncategorizedData.append(l)
                 else:
-                    currentLanguage.addText(l.strip())
+                    currentLanguage.addText(l)
                 continue
 
             currentLanguage = RevisionLanguage(headerMatch.group(1).lower())
-            langs.append(currentLanguage)
+            self._languages.append(currentLanguage)
 
-        return langs, uncategorized
+    def getLanguages(self, *predicate: str) -> list[RevisionLanguage]:
+        if self._languages is None:
+            self._parse_body()
 
-
-    @staticmethod
-    def fullparse(text: str) -> tuple[list[RevisionLanguage], list[LanguageCategory], list[CategorySection], list[str]]:
-        """
-        attempts to parse the "wiki markdown" for a page's word
-
-        uncategorized text data is returned for later processing
-        """
-
-        # TODO: clean up state machine/parser using captured lambdas instead of
-        # temporary variables
-        languages: dict[str, RevisionLanguage] = {}
-        uncategorized: list[str] = []
-        unparentedCategories: list[LanguageCategory] = []
-        unparentedSections: list[CategorySection] = []
-        currentLanguage: Optional[RevisionLanguage] = None
-        currentCategory: Optional[LanguageCategory] = None
-        current: Optional[TextSection] = None
-
-        for l in text.splitlines():
-            headerMatch = re.match(r"^([=]+)\s*([^=]+)\s*\1$", l)
-            if headerMatch is None:
-                if current is not None:
-                    # add text to current context object
-                    current.addText(l)
-                else:
-                    # text without section
-                    l_trimmed = l.strip()
-                    if len(l_trimmed) > 0:
-                        uncategorized.append(l_trimmed)
-                continue
-
-            h = headerMatch.group(2).lower()
-            hlevel = len(headerMatch.group(1))
-
-            if hlevel == 2:
-                current = currentLanguage = languages[h] = languages.get(
-                    h, RevisionLanguage(h)
-                )
-            elif hlevel == 3:
-                if currentLanguage is None:
-                    current = currentCategory = LanguageCategory(h)
-                    unparentedCategories.append(currentCategory)
-                    continue
-
-                current = currentCategory = currentLanguage.getCategory(
-                    h
-                )
-            elif hlevel == 4:
-                if currentCategory is None:
-                    current = s = CategorySection(h)
-                    unparentedSections.append(s)
-                    continue
-
-                current = currentCategory.getSection(h)
-
-        return (list(languages.values()), unparentedCategories, unparentedSections, uncategorized)
+        languages = self._languages or []
+        if len(predicate) > 0:
+            return [l for l in languages if l.name in predicate]
+        
+        return languages
 
     @staticmethod
     def from_element(e: Element) -> Optional["WordRevision"]:
@@ -208,19 +187,13 @@ class WordRevision(TextSection):
         if txt is None:
             return None
 
-        (languages, uncategorized) = WordRevision.parse(txt.getText())
-
         # python 3.11 will support multiple iso formats
         # dt = datetime.fromisoformat(ts.text)
 
         # strptime doesn't include a timezone, and since the string is
         # specifically "zulu" it should be safe to just set it to utc.
         dt = datetime.strptime(ts.getText(), "%Y-%m-%dT%H:%M:%SZ",).replace(tzinfo=timezone.utc)
-        rev = WordRevision(dt, languages)
-
-        # TODO: for debugging the markdown parser
-        rev.addUncategorizedData(uncategorized)
-        return rev
+        return WordRevision(dt, txt.getText())
 
     @staticmethod
     def from_elements(elements: list[Element]) -> list["WordRevision"]:
@@ -254,5 +227,7 @@ class WordPage(WikiPage):
             return None
 
         revisions = WordRevision.from_elements(e.getChildren("revision"))
-        assert(len(revisions) > 0)
-        return WordPage(word.getText(), revisions[0])
+        if len(revisions) > 0:
+            return WordPage(word.getText(), revisions[0])
+        
+        return None

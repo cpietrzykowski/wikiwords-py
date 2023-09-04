@@ -4,12 +4,12 @@ import os
 import sqlite3 as sqlite
 import sys
 from datetime import datetime
-from typing import Callable, Optional
+from typing import Callable
 
 from wikiwords._version import __version__
 from wikiwords.db import create_and_connect
 from wikiwords.models import WordTable
-from wikiwords.wiki_page import RevisionLanguage, WordPage, WordRevision
+from wikiwords.wiki_page import WordPage
 from wikiwords.wikiwords import ParseWordPages
 
 logging.basicConfig()
@@ -23,37 +23,21 @@ def page_handler(
     batch_size: int
 ) -> tuple[Callable[[WordPage], None], Callable[[], int]]:
     c: int = 0
+    w: int = 0
     c_split: int = 0
     t_last = datetime.now()
 
-    def _filter_language(p: WordPage, languages: list[str]) -> Optional[WordPage]:
-        """ create a `WordPage` that only contains values of language in `languages` """
-
-        if not len(languages) > 0:
-            # empty list allows all
-            return p
-
-        langs = [x for x in p.revision.languages if x.name in languages]
-        if len(langs) > 0:
-            return WordPage(
-                p.name,
-                WordRevision(p.revision.timestamp, langs)
-            )
-        
-        return None
-
-
     def _handler(p: WordPage) -> None:
         nonlocal c
+        nonlocal w
         nonlocal c_split
         nonlocal t_last
 
-        new_p = _filter_language(p, languages)
-        if new_p is None:
+        c += 1
+        if WordTable.save(cursor, p, languages) == False:
             return
-    
-        c = c + 1
-        WordTable.save(cursor, new_p)
+
+        w += 1
         if c % batch_size == 0:
             conn.execute('END TRANSACTION')
             t_now = datetime.now()

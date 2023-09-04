@@ -46,7 +46,7 @@ class TestWikiwords(unittest.TestCase):
         )
 
         self.assertEqual([
-            [w.name, [l.name for l in w.revision.languages]] for w in words
+            [w.name, [l.name for l in w.revision.getLanguages()]] for w in words
         ], [
             ['dictionary', ["english"]],
             ['raven', [

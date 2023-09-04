@@ -1,6 +1,5 @@
 from typing import Callable, TextIO
 
-# from lxml import etree
 from lxml.etree import XMLParser, parse
 
 from .parser import MediaWikiPageTarget as ParserTarget
