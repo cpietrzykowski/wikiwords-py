@@ -67,15 +67,15 @@ https://mypy.readthedocs.io/en/stable/config_file.html#confval-mypy_path
 
 Dump all words in database:
 ```
-SELECT word.word
+SELECT word.word, GROUP_CONCAT(category) categories
 FROM word
-JOIN revision ON revision.wordid = word.id
-JOIN revisions_languages ON revisions_languages.revisionid = revision.id
-JOIN language ON language.id = revisions_languages.languageid
-JOIN revisions_languages_categories ON revisions_languages_categories.revlangid = revisions_languages.id
-JOIN category ON category.id = revisions_languages_categories.categoryid
+JOIN word_languages ON word_languages.wordid = word.id
+JOIN language ON language.id = word_languages.languageid
+JOIN languages_categories ON languages_categories.wordlangid = word_languages.id
+JOIN category ON category.id = languages_categories.categoryid
+WHERE language.language = 'english'
 GROUP BY word.word
-ORDER BY word.word ASC
+ORDER BY word.word ASC, category.category ASC
 ```
 
 ## Known Limitations

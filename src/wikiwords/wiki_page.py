@@ -90,7 +90,7 @@ class RevisionLanguage(TextSection):
         currentCategory: Optional[LanguageCategory] = None
 
         for l in self.getText().splitlines(True):
-            headerMatch = re.match(r"^===\s*([^=]+)\s*===$", l)
+            headerMatch = re.match(r"^===\s*([^=]+)\s*===$", l.strip())
             if headerMatch is None:
                 if currentCategory is None:
                     # TODO
@@ -151,7 +151,7 @@ class WordRevision(TextSection):
         currentLanguage: Optional[RevisionLanguage] = None
 
         for l in self.getText().splitlines(True):
-            headerMatch = re.match(r"^==\s*([^=]+)\s*==$", l)
+            headerMatch = re.match(r"^==\s*([^=]+)\s*==$", l.strip())
             if headerMatch is None:
                 if currentLanguage is None:
                     self.uncategorizedData.append(l)
@@ -209,6 +209,14 @@ class WikiPage():
     pass
 
 
+class ValidationStrategy():
+    def isValid(self, word: str) -> bool:
+        return False
+
+class WordValidationStrategy(ValidationStrategy):
+    def isValid(self, word: str) -> bool:
+        return True
+
 class WordPage(WikiPage):
     """
         represents a wiki word page
@@ -221,9 +229,12 @@ class WordPage(WikiPage):
         self.revision = revision
 
     @staticmethod
-    def from_element(e: Element) -> Optional["WordPage"]:
+    def from_element(e: Element, validator: ValidationStrategy = WordValidationStrategy()) -> Optional["WordPage"]:
         word = e.getChild("title")
-        if word is None:
+        # TODO: validate the word, as the source includes all kinds of entries
+        # that are not actually words
+        # - filter white space/punctuation/symbols/etc.
+        if word is None or validator.isValid(word.getText()) == False:
             return None
 
         revisions = WordRevision.from_elements(e.getChildren("revision"))

@@ -54,6 +54,14 @@ class TestWikiwords(unittest.TestCase):
             ]]
         ])
 
+        # "raven" english categories
+        only_english_raven = [l for w in words if w.name == 'raven' for l in w.revision.getLanguages('english')]
+        self.assertEqual([
+            c.name for r in only_english_raven for c in r.getCategories()
+        ], [
+            'etymology 1', 'etymology 2', 'further reading', 'anagrams'
+        ])
+
         self.assertEqual([
             r.timestamp for r in [w.revision for w in words]
         ], [

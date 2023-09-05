@@ -22,32 +22,33 @@ def page_handler(
     languages: list[str],
     batch_size: int
 ) -> tuple[Callable[[WordPage], None], Callable[[], int]]:
-    c: int = 0
-    w: int = 0
-    c_split: int = 0
+    page_count: int = 0
+    word_count: int = 0
+    w_split: int = 0
     t_last = datetime.now()
 
     def _handler(p: WordPage) -> None:
-        nonlocal c
-        nonlocal w
-        nonlocal c_split
+        nonlocal page_count
+        nonlocal word_count
+        nonlocal w_split
         nonlocal t_last
 
-        c += 1
+        page_count += 1
         if WordTable.save(cursor, p, languages) == False:
             return
 
-        w += 1
-        if c % batch_size == 0:
+        word_count += 1
+        if word_count % batch_size == 0:
             conn.execute('END TRANSACTION')
             t_now = datetime.now()
-            logger.info(f"progress ({t_now}): {c} ({((c - c_split) / (t_now - t_last).total_seconds()):.02f} w/s)")
-            c_split = c
+            t_delta = (t_now - t_last).total_seconds()
+            logger.info(f"progress ({t_now}): {((word_count - w_split) / t_delta):.02f} w/s ({page_count})")
+            w_split = word_count
             t_last = t_now
             conn.execute('BEGIN TRANSACTION')
 
     def _count() -> int:
-        return c
+        return word_count
 
     return (_handler, _count)
 

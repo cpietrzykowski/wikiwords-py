@@ -146,42 +146,6 @@ VALUES (?, ?, ?, ?)
 
         return True
 
-
-# class RevisionTable(DatabaseTable):
-#     def __init__(self) -> None:
-#         super().__init__("revision")
-#         self.setFields({
-#             "id": TableField("INTEGER", "NOT NULL"),
-#             "wordid": TableField("INTEGER", "NOT NULL"),
-#             "time": TableField("TEXT"),
-#             "uncategorized": TableField("TEXT"),
-#             "unparented_categories": TableField("TEXT"),
-#         })
-
-#         self.addPrimaryKey("id")
-#         self.addForeignKey(["wordid"], "word", ["id"])
-
-
-
-
-#     @staticmethod
-#     def save(cursor: Cursor, revision: WordRevision, word_id: int) -> None:
-#         cursor.execute(
-#             'INSERT INTO revision (wordid, time, uncategorized, unparented_categories) VALUES (?, ?, ?, ?)',
-#             (
-#                 word_id,
-#                 revision.timestamp.isoformat(),
-#                 json.dumps(revision.uncategorizedData),
-#                 json.dumps(revision.unparentedCategories),
-#         ))
-
-#         revision_id = cursor.lastrowid
-#         assert(revision_id is not None)
-
-#         for l in revision.languages:
-#             RevisionsLanguagesTable.save(cursor, revision_id, l)
-
-
 class LanguageTable(DatabaseTable):
     def __init__(self) -> None:
         super().__init__("language")
@@ -202,7 +166,7 @@ class LanguageTable(DatabaseTable):
 
 
 class WordLanguagesTable(DatabaseTable):
-    """ join table for relating a revision to a language """
+    """ join table for relating a word to a language """
     def __init__(self) -> None:
         super().__init__("word_languages")
         self.setFields({
@@ -230,7 +194,7 @@ class WordLanguagesTable(DatabaseTable):
 
 
         for v in language.getCategories():
-            RevisionsLanguagesCategoriesTable.save(cursor, word_lang_id, v)
+            WordLanguagesCategoriesTable.save(cursor, word_lang_id, v)
 
 
 class CategoryTable(DatabaseTable):
@@ -247,40 +211,40 @@ class CategoryTable(DatabaseTable):
     def save(cursor: Cursor, category: str) -> Optional[int]:
         return insert_or_select_id(
             cursor,
-            lambda c: c.execute('INSERT OR IGNORE INTO category (category) VALUES (?)', (category,)),
+            lambda c: c.execute('INSERT INTO category (category) VALUES (?)', (category,)),
             lambda c: c.execute('SELECT id FROM category WHERE category = ?', (category,))
         )
 
 
-class RevisionsLanguagesCategoriesTable(DatabaseTable):
-    """ join table for relating a category to a revision language """
+class WordLanguagesCategoriesTable(DatabaseTable):
+    """ join table for relating a category to a language """
     def __init__(self) -> None:
-        super().__init__("revisions_languages_categories")
+        super().__init__("languages_categories")
         self.setFields({
             "id": TableField("INTEGER", "NOT NULL"),
-            "revlangid": TableField("INTEGER", "NOT NULL"),
+            "wordlangid": TableField("INTEGER", "NOT NULL"),
             "categoryid": TableField("INTEGER", "NOT NULL"),
         })
 
         self.addPrimaryKey("id")
-        self.addForeignKey(["revlangid"], "revisions_languages", ["id"])
+        self.addForeignKey(["wordlangid"], "word_languages", ["id"])
         self.addForeignKey(["categoryid"], "category", ["id"])
 
     @staticmethod
-    def save(cursor: Cursor, revision_language_id: int, category: LanguageCategory) -> None:
+    def save(cursor: Cursor, word_language_id: int, category: LanguageCategory) -> None:
         category_id = CategoryTable.save(cursor, category.name)
-        cursor.execute('''INSERT INTO revisions_languages_categories
-(revlangid, categoryid) VALUES (?, ?)
+        cursor.execute('''INSERT INTO languages_categories
+(wordlangid, categoryid) VALUES (?, ?)
 ''',
-            (revision_language_id, category_id)
+            (word_language_id, category_id)
         )
 
-        revision_language_category_id = cursor.lastrowid
-        assert(revision_language_category_id is not None)
+        word_language_category_id = cursor.lastrowid
+        assert(word_language_category_id is not None)
         for v in category.getSections():
-            RevisionsLanguagesCategorySectionTable.save(
+            LanguagesCategorySectionTable.save(
                 cursor,
-                revision_language_category_id,
+                word_language_category_id,
                 v
             )
 
@@ -298,32 +262,32 @@ class CategorySectionTable(DatabaseTable):
     def save(cursor: Cursor, section: CategorySection) -> Optional[int]:
         return insert_or_select_id(
             cursor,
-            lambda c: c.execute('INSERT OR IGNORE INTO category_section(section) VALUES (?)', (section.name,)),
+            lambda c: c.execute('INSERT INTO category_section(section) VALUES (?)', (section.name,)),
             lambda c: c.execute('SELECT id FROM category_section WHERE section = ?', (section.name,))
         )
 
 
-class RevisionsLanguagesCategorySectionTable(DatabaseTable):
+class LanguagesCategorySectionTable(DatabaseTable):
     def __init__(self) -> None:
-        super().__init__("revisions_languages_category_section")
+        super().__init__("languages_category_section")
         self.setFields({
             "id": TableField("INTEGER", "NOT NULL"),
-            "revlangcatid": TableField("INTEGER", "NOT NULL"),
+            "wordlangcatid": TableField("INTEGER", "NOT NULL"),
             "sectionid": TableField("INTEGER", "NOT NULL"),
             "data": TableField("TEXT")
         })
 
         self.addPrimaryKey("id")
-        self.addForeignKey(["revlangcatid"], "revisions_languages_categories", ["id"])
+        self.addForeignKey(["wordlangcatid"], "word_languages_categories", ["id"])
         self.addForeignKey(["sectionid"], "category_section", ["id"])
 
     @staticmethod
-    def save(cursor: Cursor, revision_language_category_id: int, section: CategorySection) -> None:
+    def save(cursor: Cursor, word_language_category_id: int, section: CategorySection) -> None:
         section_id = CategorySectionTable.save(cursor, section)
-        cursor.execute('''INSERT INTO revisions_languages_category_section
-(revlangcatid, sectionid) VALUES (?, ?)
+        cursor.execute('''INSERT INTO languages_category_section
+(wordlangcatid, sectionid) VALUES (?, ?)
 ''',
-            (revision_language_category_id, section_id)
+            (word_language_category_id, section_id)
         )
 
 def models() -> list[DatabaseTable]:
@@ -333,6 +297,6 @@ def models() -> list[DatabaseTable]:
         CategoryTable(),
         CategorySectionTable(),
         WordLanguagesTable(),
-        RevisionsLanguagesCategoriesTable(),
-        RevisionsLanguagesCategorySectionTable(),
+        WordLanguagesCategoriesTable(),
+        LanguagesCategorySectionTable(),
     ]
