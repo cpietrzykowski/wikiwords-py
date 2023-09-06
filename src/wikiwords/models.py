@@ -272,22 +272,22 @@ class LanguagesCategorySectionTable(DatabaseTable):
         super().__init__("languages_category_section")
         self.setFields({
             "id": TableField("INTEGER", "NOT NULL"),
-            "wordlangcatid": TableField("INTEGER", "NOT NULL"),
+            "langcatid": TableField("INTEGER", "NOT NULL"),
             "sectionid": TableField("INTEGER", "NOT NULL"),
             "data": TableField("TEXT")
         })
 
         self.addPrimaryKey("id")
-        self.addForeignKey(["wordlangcatid"], "word_languages_categories", ["id"])
+        self.addForeignKey(["langcatid"], "languages_categories", ["id"])
         self.addForeignKey(["sectionid"], "category_section", ["id"])
 
     @staticmethod
-    def save(cursor: Cursor, word_language_category_id: int, section: CategorySection) -> None:
+    def save(cursor: Cursor, language_category_id: int, section: CategorySection) -> None:
         section_id = CategorySectionTable.save(cursor, section)
         cursor.execute('''INSERT INTO languages_category_section
-(wordlangcatid, sectionid) VALUES (?, ?)
+(langcatid, sectionid) VALUES (?, ?)
 ''',
-            (word_language_category_id, section_id)
+            (language_category_id, section_id)
         )
 
 def models() -> list[DatabaseTable]:
